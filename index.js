@@ -1,11 +1,8 @@
 var express = require('express');
 var _ = require('lodash');
-var tweets = require('./fixtures').tweets;
-var users = require('./fixtures').users;
 var bodyParser = require('body-parser');
 var cookieParser = require('cookie-parser');
 var expressSession = require('express-session');
-var shortId = require('shortid');
 var passport = require('./auth.js');
 var config = require('./config');
 
@@ -29,18 +26,23 @@ app.use(passport.session());
 app.get('/api/tweets', function(req, res){
 	var userId = req.query.userId;
 
-	if(!!userId) {
-		var userTweets = _.where(tweets, {userId: userId});
-			userTweets = _.sortBy(userTweets, function(tweet) { return tweet.created; }).reverse();
+	if(userId) {
+		Tweet.find({userId: userId}, null, {sort: {created: -1}}, function(err, tweets){
+			if(err){
+				res.sendStatus(500);
+			}
+			else{
+				userTweets = _.map(tweets, function(tweet){
+					return tweet.toClient();
+				});
 
-		res.status(200)
-		   .send({tweets: userTweets})
-		   .end();
+				console.log(userTweets);
+				res.status(200).send({tweets: userTweets}).end();
+			}
+		});
 	}
-	else {
-		res.status(400)
-		   .send('Bad Request')
-		   .end();
+	else{
+		res.sendStatus(400);
 	}
 });
 
@@ -101,53 +103,60 @@ app.post('/api/users', function(req, res){
 app.post('/api/tweets', ensureAuthentication, function(req, res){
 	var tweet = req.body.tweet;
 	tweet.userId = req.user.id;
-
-	tweet.id = shortId.generate();
 	tweet.created = Math.floor(new Date() / 1000);
 
-	tweets.push(tweet);
-
-	res.status(200)
-		.send({tweet: tweet})
-		.end();
+	Tweet.create(tweet, function(err, tweet){
+		if(tweet){
+			res.status(200).send({tweet:tweet.toClient()}).end();
+		}
+		else{
+			res.sendStatus(500);
+		}
+	});
 });
 
 app.get('/api/tweets/:tweetId', function(req, res){
 	var tweetId = req.params.tweetId;
 
-	var tweet = _(tweets).findWhere({id: tweetId});
-
-	if(tweet){
-		return res.status(200)
-					.send({tweet: tweet})
+	Tweet.findById(tweetId, function(err, tweet){
+		if(err){
+			res.sendStatus(500);
+		}
+		else{
+			if(tweet){
+				return res.status(200)
+					.send({tweet: tweet.toClient()})
 					.end();
-	}
-	else{
-		return res.status(404)
+			}
+			else{
+				return res.status(404)
 					.end();
-	}
+			}
+		}
+	});
 });
 
 app.delete('/api/tweets/:tweetId', ensureAuthentication, function(req, res){
 	var tweetId = req.params.tweetId;
 
-	var tweet = _(tweets).findWhere({id: tweetId});
+	Tweet.findById(tweetId, function(err, tweet){
+		if(!tweet){
+			return res.sendStatus(404);
+		}
 
-	if(tweet) {
 		if(req.user.id !== tweet.userId){
-			res.sendStatus(403);
+			return res.sendStatus(403);
 		}
-		else {
-			var tweetIndex = tweets.indexOf(tweet);
-			tweets.splice(tweetIndex, 1);
-			return res.status(200)
-				.end();
-		}
-	}
-	else {
-		return res.send(404)
-			.end();
-	}
+
+		Tweet.findByIdAndRemove(tweetId, function(err){
+			if(err){
+				return res.sendStatus(500);
+			}
+			else{
+				return res.sendStatus(200);
+			}
+		});
+	});
 });
 
 app.post('/api/auth/login', function(req, res) {
