@@ -3,11 +3,23 @@ var _ = require('lodash');
 var tweets = require('./fixtures').tweets;
 var users = require('./fixtures').users;
 var bodyParser = require('body-parser');
+var cookieParser = require('cookie-parser');
+var expressSession = require('express-session');
 var shortId = require('shortid');
+var passport = require('./auth.js');
 
 var app = express();
 
 app.use(bodyParser.json());
+app.use(cookieParser());
+app.use(expressSession({
+	secret: 'keyboard cat',
+	resave: false,
+	saveUninitialized: true
+}));
+
+app.use(passport.initialize());
+app.use(passport.session());
 
 app.get('/api/tweets', function(req, res){
 	var userId = req.query.userId;
@@ -65,8 +77,9 @@ app.post('/api/users', function(req, res){
 	}
 });
 
-app.post('/api/tweets', function(req, res){
+app.post('/api/tweets', ensureAuthentication, function(req, res){
 	var tweet = req.body.tweet;
+	tweet.userId = req.user.id;
 
 	tweet.id = shortId.generate();
 	tweet.created = Math.floor(new Date() / 1000);
@@ -94,22 +107,59 @@ app.get('/api/tweets/:tweetId', function(req, res){
 	}
 });
 
-app.delete('/api/tweets/:tweetId', function(req, res){
+app.delete('/api/tweets/:tweetId', ensureAuthentication, function(req, res){
 	var tweetId = req.params.tweetId;
 
 	var tweet = _(tweets).findWhere({id: tweetId});
 
 	if(tweet) {
-		var tweetIndex = tweets.indexOf(tweet);
-		tweets.splice(tweetIndex, 1);
-		return res.status(200)
-					.end();
+		if(req.user.id !== tweet.userId){
+			res.sendStatus(403);
+		}
+		else {
+			var tweetIndex = tweets.indexOf(tweet);
+			tweets.splice(tweetIndex, 1);
+			return res.status(200)
+				.end();
+		}
 	}
 	else {
 		return res.send(404)
-					.end();
+			.end();
 	}
 });
+
+app.post('/api/auth/login', function(req, res) {
+	passport.authenticate('local', function(err, user){
+		if(err){
+			res.status(500).end();
+		}
+		if(!user){
+			res.status(403).send();
+		}
+		else
+		{
+			req.logIn(user, function(err){
+				if(err){
+					res.status(500).end();
+				}
+				else {
+					res.send({user: user}).end();
+				}
+			});
+		}
+	})(req, res);
+});
+
+function ensureAuthentication(req, res, next){
+	if(req.isAuthenticated()){
+		next();
+	}
+	else{
+		res.status(403)
+			.end();
+	}
+}
 
 var server = app.listen('3000', '127.0.0.1');
 
