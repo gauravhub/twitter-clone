@@ -3,16 +3,19 @@ var _ = require('lodash');
 var localStrategy = require('passport-local').Strategy;
 var connection = require('./db');
 var User = connection.model('User');
+var bcrypt = require('bcrypt');
 
 passport.use(new localStrategy(function(username, password, done){
     User.findOne({id: username}, function(err, user){
         if(user){
-            if(user.password === password){
-                done(null, user);
-            }
-            else{
-                done(null, false, { message: 'Incorrect password.' });
-            }
+            bcrypt.compare(password, user.password, function(err, result){
+                if(result){
+                    done(null, user);
+                }
+                else {
+                    done(null, false, {message: 'Incorrect password.'});
+                }
+            });
         }
         else{
             done(null, false, { message: 'Incorrect username.' });
