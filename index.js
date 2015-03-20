@@ -7,6 +7,11 @@ var cookieParser = require('cookie-parser');
 var expressSession = require('express-session');
 var shortId = require('shortid');
 var passport = require('./auth.js');
+var config = require('./config');
+
+var connection = require('./db');
+var User = connection.model('User');
+var Tweet = connection.model('Tweet');
 
 var app = express();
 
@@ -42,39 +47,55 @@ app.get('/api/tweets', function(req, res){
 app.get('/api/users/:userId', function(req, res){
 	var userId = req.params.userId;
 
-	var user = _.findWhere(users, {id: userId});
+	User.findOne({id: userId}, function(err, user){
+		if(!!user){
+			res.status(200)
+				.send({user: user})
+				.end();
+		}
+		else {
+			res.status(404)
+				.end();
+		}
+	});
+});
 
-	if(!!user){
-		res.status(200)
-			.send({user: user})
-			.end();
-	}
-	else {
-		res.status(404)
-			.end();
-	}
+app.post('/api/users/:userId', function(req, res){
+	var userId = req.params.userId;
+
+	User.findOneAndUpdate({id: userId}, req.body,  function(err, user){
+		if(user){
+			res.sendStatus(200);
+		}
+		else{
+			res.sendStatus(404);
+		}
+	});
 });
 
 app.post('/api/users', function(req, res){
 	var user = req.body.user;
 
-	var existingUser = _.findWhere(users, {id: user.id});
-
-	if(!existingUser){
-		if(!user.followingIds){
-			user.followingIds = [];
+	User.create(user, function(err, user){
+		if(err){
+			if (err.code === 11000) {
+				res.sendStatus(409);
+			}
+			else {
+				res.sendStatus(500);
+			}
 		}
-
-		users.push(user);
-
-		res.status(200)
-			.send(user)
-			.end();
-	}
-	else {
-		res.status(409)
-			.end();
-	}
+		else{
+			req.logIn(user, function(err){
+				if(err){
+					res.status(500).end();
+				}
+				else {
+					res.status(200).send({user: user}).end();
+				}
+			});
+		}
+	});
 });
 
 app.post('/api/tweets', ensureAuthentication, function(req, res){
@@ -151,6 +172,11 @@ app.post('/api/auth/login', function(req, res) {
 	})(req, res);
 });
 
+app.post('/api/auth/logout', function(req, res){
+	req.logOut();
+	res.sendStatus(200);
+});
+
 function ensureAuthentication(req, res, next){
 	if(req.isAuthenticated()){
 		next();
@@ -161,6 +187,6 @@ function ensureAuthentication(req, res, next){
 	}
 }
 
-var server = app.listen('3000', '127.0.0.1');
+var server = app.listen(config.get("server:port"), config.get("server:hostname"));
 
 module.exports = server;
